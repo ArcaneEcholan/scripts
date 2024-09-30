@@ -1,0 +1,65 @@
+#!/usr/bin/env python3
+
+import os
+
+def wrap_json_in_markdown(file_path):
+    with open(file_path, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+
+    new_lines = []
+    inside_json_block = False
+    inside_code_block = False
+    json_block = []
+    brace_counter = 0
+
+    for line in lines:
+        stripped_line = line.strip()
+
+        # Detect code block (```), if we're already in a code block, skip wrapping
+        if stripped_line.startswith("```"):
+            inside_code_block = not inside_code_block
+            new_lines.append(line)
+            continue
+
+        # Detect the start of a JSON block if not already inside a code block
+        if stripped_line.startswith('{') and not inside_json_block and not inside_code_block:
+            inside_json_block = True
+            brace_counter = 1
+            json_block = ["```json\n", line]
+            continue
+
+        if inside_json_block:
+            json_block.append(line)
+
+            # Count opening and closing braces to track the entire JSON block
+            brace_counter += line.count('{')
+            brace_counter -= line.count('}')
+
+            # If we've closed all braces, the JSON block is complete
+            if brace_counter == 0:
+                json_block.append("```\n")
+                new_lines.extend(json_block)
+                inside_json_block = False
+            continue
+
+        # If not inside a JSON block, just append the line
+        new_lines.append(line)
+
+    # Write the modified content back to the file
+    with open(file_path, 'w', encoding='utf-8') as f:
+        f.writelines(new_lines)
+
+def process_markdown_files(directory):
+    for filename in os.listdir(directory):
+        if filename.endswith('.md'):
+            file_path = os.path.join(directory, filename)
+            wrap_json_in_markdown(file_path)
+            print(f"Processed: {file_path}")
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) != 2:
+        print("Usage: wrapjson /path/to/markdownfile/")
+    else:
+        directory = sys.argv[1]
+        process_markdown_files(directory)

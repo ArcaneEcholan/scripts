@@ -1,0 +1,14 @@
+[
+  {
+    "address": "admin@172.27.128.129",
+    "credential": "ttnproject@ndsec"
+  },
+  {
+    "address": "admin@172.27.128.176",
+    "credential": "ttnproject@ndsec"
+  },
+  {
+    "address": "admin@172.27.128.192",
+    "credential": "ttnproject@ndsec"
+  }
+]

@@ -1,0 +1,170 @@
+#!/usr/bin/env python3
+
+import datetime
+import os
+import re
+
+from urllib.parse import urlparse
+import argparse
+from pathlib import Path
+import json5
+import requests
+from pdfminer.high_level import extract_text
+
+
+def get_first_line(pdf_path):
+    # Extract text from the first page of the PDF
+    try:
+        text = extract_text(pdf_path, maxpages=1)
+    except Exception as e:
+        print(f"Error extracting text from '{pdf_path}': {e}")
+        return None
+
+    text = text.strip()
+    if text:
+        # Split the text into lines
+        lines = text.splitlines()
+        if lines:
+            first_line = lines[0].strip()
+            return first_line
+    return None
+
+
+def sanitize_filename(filename):
+    # Remove any illegal filesystem characters
+    invalid_chars = '<>:"/\\|?*'
+    return ''.join(c for c in filename if c not in invalid_chars)
+
+
+def rename_pdfs_in_directory(directory_path):
+    for filename in os.listdir(directory_path):
+        if filename.lower().endswith('.pdf'):
+            pdf_path = os.path.join(directory_path, filename)
+            first_line = get_first_line(pdf_path)
+            if first_line is None:
+                print(f"No text found in '{filename}'.")
+                continue
+
+            valid_filename = sanitize_filename(first_line)
+            # Truncate filename if it's too long
+            if len(valid_filename) > 255:
+                valid_filename = valid_filename[:255]
+            new_pdf_path = os.path.join(directory_path, valid_filename + '.pdf')
+
+            try:
+                # Remove the existing file if it exists
+                if os.path.exists(new_pdf_path):
+                    # os.remove(new_pdf_path)
+                    print(f"Existing file '{new_pdf_path}' has been overwritten.")
+
+                os.rename(pdf_path, new_pdf_path)
+                print(f"Renamed '{filename}' to '{valid_filename}.pdf'")
+            except Exception as e:
+                print(f"Failed to rename '{filename}': {e}")
+
+    print("Renaming complete.")
+
+
+def downloadLink(url, save_dir='downloads'):
+    """
+    Downloads the content from the given URL and saves it to the specified directory.
+
+    :param url: The URL to download.
+    :param save_dir: The directory where files will be saved.
+    """
+    try:
+        # Ensure the save directory exists
+        os.makedirs(save_dir, exist_ok=True)
+
+        cookie_str = "seraph.confluence=89849993%3A4a2bf2feebc569b811bf0e638841acd599493ce0; mywork.tab.tasks=false; JSESSIONID=42F137B1D6A85DF76C4088D85FCF0BB2"
+
+        # Function to parse cookie string into a dictionary
+        def parse_cookie_string(cookie_str):
+            cookies = {}
+            items = cookie_str.split(';')
+            for item in items:
+                if '=' in item:
+                    key, value = item.strip().split('=', 1)
+                    cookies[key] = value
+            return cookies
+
+        cookies = parse_cookie_string(cookie_str)
+
+        with requests.get(url, stream=True, verify=False, cookies=cookies) as response:
+            response.raise_for_status()  # Check for HTTP errors
+
+            # Attempt to get the filename from the Content-Disposition header
+            cd = response.headers.get('content-disposition')
+            if cd:
+                fname = re.findall('filename="?([^\'";]+)"?', cd)
+                if fname:
+                    filename = fname[0]
+                else:
+                    filename = 'downloaded_file'
+            else:
+                # Fallback to URL basename
+                parsed_url = urlparse(url)
+                filename = os.path.basename(parsed_url.path)
+                if not filename:
+                    filename = 'downloaded_file'
+
+            # Full path to save the file
+            file_path = os.path.join(save_dir, filename)
+
+            print(f"Downloading {url} to {file_path}...")
+
+            # Write the content in chunks to handle large files
+            with open(file_path, 'wb') as file:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:  # Filter out keep-alive chunks
+                        file.write(chunk)
+
+        print(f"Successfully downloaded {file_path}")
+
+    except requests.exceptions.HTTPError as http_err:
+        print(f"HTTP error occurred while downloading {url}: {http_err}")
+    except requests.exceptions.ConnectionError as conn_err:
+        print(f"Connection error occurred while downloading {url}: {conn_err}")
+    except requests.exceptions.Timeout as timeout_err:
+        print(f"Timeout error occurred while downloading {url}: {timeout_err}")
+    except requests.exceptions.RequestException as req_err:
+        print(f"An error occurred while downloading {url}: {req_err}")
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+
+
+def main():
+
+    parser = argparse.ArgumentParser(description="Read pdfname.json from the parent folder.")
+    parser.add_argument(
+        "--parent-dir", "-p",
+        type=str,
+        default=Path.cwd(),  # Default to current working directory
+        help="The path to the parent directory (optional, defaults to current working directory)"
+    )
+    args = parser.parse_args()
+
+    parent_dir = Path(args.parent_dir)
+    config_file = parent_dir / 'pdfname.json'
+
+    if config_file.exists() and config_file.is_file():
+        # Read the JSON file into a dictionary
+        with open(config_file, 'r') as file:
+            config_data = json5.load(file)
+        print("Config file content:", config_data)
+        nowstr = f'{datetime.datetime.now():%Y-%m-%d=%H:%M:%S}'
+        os.makedirs(name=nowstr, exist_ok=True)
+
+        prefix = "https://wiki.ndsec.work/spaces/flyingpdf/pdfpageexport.action?pageId="
+
+        for group in config_data:
+            dest = f"{nowstr}/{group['name']}"
+            os.makedirs(name=dest, exist_ok=True)
+            for page_id in group['list']:
+                downloadLink(f"{prefix}{page_id}", save_dir=dest)
+            rename_pdfs_in_directory(directory_path=dest)
+    else:
+        print(f"Config file {config_file} not found.")
+
+if __name__ == "__main__":
+    main()
